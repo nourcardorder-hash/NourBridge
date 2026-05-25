@@ -1,0 +1,56 @@
+{
+  "name": "nour-bridge-token-vault",
+  "version": "1.0.0",
+  "description": "Multi-Signature Token Vault for USDC and MATIC with Zero Gas Deposits",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy:mumbai": "hardhat run scripts/deploy.js --network mumbai",
+    "deploy:polygon": "hardhat run scripts/deploy.js --network polygon",
+    "verify": "hardhat verify",
+    "start:backend": "node backend/server.js",
+    "dev:backend": "nodemon backend/server.js",
+    "build:frontend": "cd frontend && npm run build",
+    "start:frontend": "cd frontend && npm start",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "ethereum",
+    "polygon",
+    "multisig",
+    "vault",
+    "usdc",
+    "matic",
+    "smart-contract"
+  ],
+  "author": "nourcardorder-hash",
+  "license": "MIT",
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0",
+    "@openzeppelin/hardhat-upgrades": "^2.0.0",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.7.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "joi": "^17.10.2",
+    "web3": "^1.10.0",
+    "axios": "^1.5.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "hardhat": "^2.17.0",
+    "hardhat-gas-reporter": "^1.0.9",
+    "solidity-coverage": "^0.8.4",
+    "chai": "^4.3.7",
+    "ethers": "^6.7.1",
+    "nodemon": "^3.0.1",
+    "eslint": "^8.49.0",
+    "prettier": "^3.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.4",
+    "@typescript-eslint/parser": "^6.7.4"
+  }
+}
