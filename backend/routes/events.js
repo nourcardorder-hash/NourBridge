@@ -17,7 +17,8 @@ router.get('/', authenticate, async (req, res) => {
       limit = 20,
       skip = 0,
       startDate,
-      endDate
+      endDate,
+      sandbox
     } = req.query;
 
     const result = await EventSyncService.getUserEvents(req.user.id, {
@@ -27,13 +28,15 @@ router.get('/', authenticate, async (req, res) => {
       limit,
       skip,
       startDate,
-      endDate
+      endDate,
+      sandbox: sandbox !== undefined ? sandbox === 'true' : null
     });
 
     res.json({
       success: true,
       data: result.events,
-      pagination: result.pagination
+      pagination: result.pagination,
+      sandboxMode: EventSyncService.isSandboxEnabled()
     });
   } catch (error) {
     console.error('Get events error:', error);
@@ -45,12 +48,16 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 /**
- * GET /api/events/unread
+ * GET /api/events/unread/count
  * Get unread events count
  */
 router.get('/unread/count', authenticate, async (req, res) => {
   try {
-    const count = await EventSyncService.getUnreadCount(req.user.id);
+    const { sandbox } = req.query;
+    const count = await EventSyncService.getUnreadCount(
+      req.user.id,
+      sandbox !== undefined ? sandbox === 'true' : null
+    );
 
     res.json({
       success: true,
@@ -143,6 +150,7 @@ router.get('/:id', authenticate, async (req, res) => {
 /**
  * POST /api/events/sync
  * Sync event from external source (requires master key signature)
+ * Works in both development and production
  */
 router.post('/sync', async (req, res) => {
   try {
@@ -168,7 +176,8 @@ router.post('/sync', async (req, res) => {
     res.status(201).json({
       success: true,
       data: event,
-      message: 'Event synced successfully'
+      message: 'Event synced successfully',
+      sandboxMode: EventSyncService.isSandboxEnabled()
     });
   } catch (error) {
     console.error('Event sync error:', error);
@@ -181,14 +190,14 @@ router.post('/sync', async (req, res) => {
 
 /**
  * POST /api/events/sandbox
- * Create local sandbox event (testing only)
+ * Create local sandbox event (works in production when enabled)
  */
 router.post('/sandbox', authenticate, async (req, res) => {
   try {
-    if (process.env.NODE_ENV === 'production') {
+    if (!EventSyncService.isSandboxEnabled()) {
       return res.status(403).json({
         success: false,
-        message: 'Sandbox events only available in development'
+        message: 'Sandbox mode is disabled. Enable SANDBOX_MODE=true in environment variables.'
       });
     }
 
@@ -225,8 +234,29 @@ router.post('/sandbox', authenticate, async (req, res) => {
 });
 
 /**
+ * GET /api/events/stats/system
+ * Get system event statistics
+ */
+router.get('/stats/system', authenticate, async (req, res) => {
+  try {
+    const stats = await EventSyncService.getSystemStats(req.user.id);
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Get system stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
  * DELETE /api/events/:id
- * Delete event (admin only)
+ * Delete event
  */
 router.delete('/:id', authenticate, async (req, res) => {
   try {
@@ -263,7 +293,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 /**
- * GET /api/events/verify-signature
+ * POST /api/events/verify-signature
  * Verify event signature (utility endpoint)
  */
 router.post('/verify-signature', (req, res) => {
@@ -293,7 +323,7 @@ router.post('/verify-signature', (req, res) => {
 });
 
 /**
- * GET /api/events/create-signature
+ * POST /api/events/create-signature
  * Create signature for event (utility endpoint)
  */
 router.post('/create-signature', (req, res) => {
