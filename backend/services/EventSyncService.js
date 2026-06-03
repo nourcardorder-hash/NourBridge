@@ -5,7 +5,8 @@ const User = require('../models/User');
 class EventSyncService {
   constructor() {
     this.masterKey = process.env.MASTER_KEY;
-    this.sandboxEnabled = process.env.SANDBOX_MODE === 'true';
+    // Allow sandbox in both development and production
+    this.sandboxEnabled = process.env.SANDBOX_MODE === 'true' || process.env.SANDBOX_MODE === '1';
   }
 
   /**
@@ -122,7 +123,8 @@ class EventSyncService {
         limit = 20,
         skip = 0,
         startDate,
-        endDate
+        endDate,
+        sandbox = null
       } = options;
 
       const filter = { userId };
@@ -130,7 +132,13 @@ class EventSyncService {
       if (eventType) filter.eventType = eventType;
       if (category) filter.category = category;
       if (isRead !== undefined) filter.isRead = isRead;
-      if (this.sandboxEnabled) filter.isSandbox = true;
+      
+      // If sandbox parameter not specified, filter by current mode
+      if (sandbox !== null) {
+        filter.isSandbox = sandbox;
+      } else if (this.sandboxEnabled) {
+        filter.isSandbox = true;
+      }
 
       // Date range filter
       if (startDate || endDate) {
@@ -180,7 +188,7 @@ class EventSyncService {
   }
 
   /**
-   * Create local sandbox event
+   * Create sandbox event (works in production)
    */
   async createSandboxEvent(userId, eventData) {
     try {
@@ -192,6 +200,10 @@ class EventSyncService {
         metadata,
         severity = 'info'
       } = eventData;
+
+      if (!this.sandboxEnabled) {
+        throw new Error('Sandbox mode is disabled. Enable SANDBOX_MODE in environment variables.');
+      }
 
       const event = new Event({
         userId,
@@ -265,13 +277,20 @@ class EventSyncService {
   /**
    * Get unread events count
    */
-  async getUnreadCount(userId) {
+  async getUnreadCount(userId, sandbox = null) {
     try {
-      const count = await Event.countDocuments({
+      const filter = {
         userId,
-        isRead: false,
-        isSandbox: this.sandboxEnabled
-      });
+        isRead: false
+      };
+
+      if (sandbox !== null) {
+        filter.isSandbox = sandbox;
+      } else if (this.sandboxEnabled) {
+        filter.isSandbox = true;
+      }
+
+      const count = await Event.countDocuments(filter);
 
       return count;
     } catch (error) {
@@ -281,22 +300,52 @@ class EventSyncService {
   }
 
   /**
+   * Get sandbox status
+   */
+  isSandboxEnabled() {
+    return this.sandboxEnabled;
+  }
+
+  /**
    * Clean old sandbox events (older than 30 days)
    */
-  async cleanOldSandboxEvents() {
+  async cleanOldSandboxEvents(daysOld = 30) {
     try {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const thresholdDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
 
       const result = await Event.deleteMany({
         isSandbox: true,
-        createdAt: { $lt: thirtyDaysAgo }
+        createdAt: { $lt: thresholdDate }
       });
 
-      console.log(`🧹 Cleaned ${result.deletedCount} old sandbox events`);
+      console.log(`🧹 Cleaned ${result.deletedCount} old sandbox events (older than ${daysOld} days)`);
 
       return result;
     } catch (error) {
       console.error('Clean old events error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get system statistics
+   */
+  async getSystemStats(userId) {
+    try {
+      const stats = {
+        sandboxEnabled: this.sandboxEnabled,
+        environment: process.env.NODE_ENV || 'development',
+        events: {
+          total: await Event.countDocuments({ userId }),
+          unread: await Event.countDocuments({ userId, isRead: false }),
+          sandbox: await Event.countDocuments({ userId, isSandbox: true }),
+          production: await Event.countDocuments({ userId, isSandbox: false })
+        }
+      };
+
+      return stats;
+    } catch (error) {
+      console.error('Get system stats error:', error);
       throw error;
     }
   }
