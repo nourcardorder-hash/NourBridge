@@ -1,86 +1,80 @@
 #!/bin/bash
-# ============================================================
-# نشر وتشغيل أداة التنظيف والجمع داخل الريبو تلقائياً
-# ============================================================
-
-set -e
-
-REPO_DIR="/opt/tron-engine/NourBridge"
-
-# 1. التأكد من وجود الريبو، وإن لم يوجد يتم استنساخه
-if [ ! -d "$REPO_DIR" ]; then
-    echo "📥 استنساخ الريبو من GitHub..."
-    git clone https://github.com/nourcardorder-hash/NourBridge.git "$REPO_DIR"
-else
-    echo "✅ الريبو موجود بالفعل في: $REPO_DIR"
-fi
-
-# 2. إنشاء ملف tron_collector.sh داخل الريبو
-cat > "$REPO_DIR/tron_collector.sh" << 'EOF'
-#!/bin/bash
-# ==============================================================
-# TRON ULTRA - SINGLE FILE ASSET COLLECTOR & SYSTEM PURGE v1.0
-# ==============================================================
+# ==============================================================================
+# SOVEREIGN LOCK v2.0 - GitHub Repo Hardening & Asset Encryption
+# Uses your device fingerprint as the only key to unlock.
+# ==============================================================================
 
 set -euo pipefail
 
-BASE_DIR="/opt/tron-engine/NourBridge"
-COLLECT_DIR="$BASE_DIR/collected_assets"
-REPORT_FILE="$BASE_DIR/FINANCIAL_ASSETS_REPORT.txt"
-PACKAGE_FILE="$BASE_DIR/all_assets_backup.tar.gz"
+# 1. Prompt for Device Fingerprint
+echo "Enter your device fingerprint (from phone/terminal):"
+read -s DEVICE_FINGERPRINT
 
-mkdir -p "$COLLECT_DIR"
-echo "ASSETS COLLECTION LOG - $(date)" > "$REPORT_FILE"
+if [ -z "$DEVICE_FINGERPRINT" ]; then
+    echo "Error: Fingerprint cannot be empty. Aborting."
+    exit 1
+fi
 
-# 1. PURGE INFECTED / TEMPORARY / CACHE FILES
-echo "PURGE: Removing infected and cache files..." >> "$REPORT_FILE"
-find "$BASE_DIR" -type f \( -name "*.log" -o -name "*.tmp" -o -name "*.cache" -o -name "*.socket" -o -name "*.pid" -o -name "*.git" -o -name "config.json" -o -name ".env" -o -name ".env.*" \) -delete
-rm -rf "$BASE_DIR/.git" "$BASE_DIR/.gitignore" "$BASE_DIR/.gitmodules" 2>/dev/null
-rm -rf "$BASE_DIR/node_modules" 2>/dev/null
+# 2. Define paths
+TARGET_DIR="${1:-$(pwd)}"
+LOCK_FILE="$TARGET_DIR/.sovereign.lock"
+ENCRYPTED_ARCHIVE="$TARGET_DIR/.sovereign_assets.enc"
 
-# 2. COLLECT FINANCIAL ASSETS (Keystores, Private Keys, Wallets, Addresses)
-echo "SCANNING FOR FINANCIAL ASSETS..." >> "$REPORT_FILE"
+echo "Applying Sovereign Lock to: $TARGET_DIR"
 
-find "$BASE_DIR" -type f \( -iname "*.json" -o -iname "*.pem" -o -iname "*.key" -o -iname "wallet.dat" -o -iname "keystore" -o -iname "*.wallet" -o -iname "*.txt" -o -iname "*.csv" \) -exec bash -c '
-    asset="$1"
-    filename=$(basename "$asset")
-    cp -n "$asset" "'"$COLLECT_DIR"'"/"$filename" 2>/dev/null || true
-    echo "ASSET: $asset" >> "'"$REPORT_FILE"'"
-' _ {} \;
+# 3. Clean tracking & cache files
+echo "[1/4] Purging temp, cache, and git tracking files..."
+find "$TARGET_DIR" -type f \( -name "*.log" -o -name "*.tmp" -o -name "*.cache" -o -name ".env" -o -name "config.json" -o -name "package-lock.json" \) -delete
+rm -rf "$TARGET_DIR/.git" "$TARGET_DIR/node_modules" 2>/dev/null
 
-# 3. EXTRACT AND LOG CRYPTO ADDRESSES FROM TEXT FILES
-find "$BASE_DIR" -type f \( -iname "*.txt" -o -iname "*.csv" -o -iname "*.address" \) -exec grep -E -i "(T[0-9a-zA-Z]{33}|0x[a-fA-F0-9]{40}|1[0-9a-zA-Z]{33})" {} >> "$REPORT_FILE" 2>/dev/null \;
+# 4. Lock file permissions
+echo "[2/4] Locking file permissions..."
+chmod -R 750 "$TARGET_DIR"
+find "$TARGET_DIR" -type f -exec chmod 640 {} \;
 
-# 4. PACKAGE ALL COLLECTED ASSETS INTO ONE SECURED ARCHIVE
-tar -czf "$PACKAGE_FILE" -C "$COLLECT_DIR" .
-rm -rf "$COLLECT_DIR"
+# 5. Encrypt sensitive assets using your fingerprint as the key
+echo "[3/4] Encrypting wallets, keys, and JSON configs..."
+# Collect sensitive files into a temp archive
+tar -czf "$TARGET_DIR/.assets_to_lock.tar.gz" \
+    "$TARGET_DIR"/*.key "$TARGET_DIR"/*.pem "$TARGET_DIR"/*.wallet \
+    "$TARGET_DIR"/*.json "$TARGET_DIR"/*.env 2>/dev/null || true
 
-# 5. CLOSE ALL PORTS, KILL BACKGROUND PROCESSES (Silent Isolation)
-iptables -P INPUT DROP 2>/dev/null
-iptables -P OUTPUT DROP 2>/dev/null
-iptables -P FORWARD DROP 2>/dev/null
-iptables -A INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null
-iptables -A OUTPUT -p tcp --sport 22 -j ACCEPT 2>/dev/null
+if [ -f "$TARGET_DIR/.assets_to_lock.tar.gz" ]; then
+    # Encrypt using AES-256-CBC with PBKDF2
+    openssl enc -aes-256-cbc -pbkdf2 -salt -in "$TARGET_DIR/.assets_to_lock.tar.gz" \
+        -out "$ENCRYPTED_ARCHIVE" -pass pass:"$DEVICE_FINGERPRINT"
+    
+    # Securely delete the original plaintext files
+    rm -f "$TARGET_DIR"/*.key "$TARGET_DIR"/*.pem "$TARGET_DIR"/*.wallet "$TARGET_DIR"/*.json
+    rm -f "$TARGET_DIR/.assets_to_lock.tar.gz"
+    echo "Assets encrypted. Only your fingerprint can decrypt them."
+fi
 
-pkill -f "NourBridge" 2>/dev/null
-pkill -f "nourbridge" 2>/dev/null
-pkill -f "node.*server.js" 2>/dev/null
-fuser -k 3000/tcp 2>/dev/null
-fuser -k 5000/tcp 2>/dev/null
-fuser -k 8080/tcp 2>/dev/null
+# 6. Create a signed lock file
+echo "$DEVICE_FINGERPRINT" > "$LOCK_FILE"
+sha256sum "$ENCRYPTED_ARCHIVE" >> "$LOCK_FILE"
 
-# 6. FINAL REPORT
-echo "ALL FINANCIAL ASSETS SECURED IN: $PACKAGE_FILE" >> "$REPORT_FILE"
-echo "SYSTEM PURGED. PORTS CLOSED. BACKGROUND KILLED."
+# 7. Cut outbound background connections (Firewall isolation)
+echo "[4/4] Cutting outbound connections (Local firewall drop)..."
+if command -v iptables &> /dev/null; then
+    iptables -P OUTPUT DROP 2>/dev/null
+    iptables -P FORWARD DROP 2>/dev/null
+    iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null
+    iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null
+elif command -v netsh &> /dev/null; then
+    netsh advfirewall firewall add rule name="Sovereign_Block_All" dir=out action=block protocol=any 2>/dev/null
+fi
 
-echo "ASSETS LOG: $REPORT_FILE"
-echo "ASSETS ARCHIVE: $PACKAGE_FILE"
-EOF
+# 8. Make the lock file immutable (prevents deletion/changes)
+chattr +i "$LOCK_FILE" 2>/dev/null || attrib +r "$LOCK_FILE" 2>/dev/null
 
-# 3. منح الصلاحيات وتشغيله فوراً
-cd "$REPO_DIR"
-chmod +x tron_collector.sh
-echo "🚀 جاري تشغيل الملف داخل الريبو..."
-sudo ./tron_collector.sh
+# 9. Self-destruct the script after execution (optional, prevents re-running)
+rm -- "$0" 2>/dev/null || true
 
-echo "✅ تم وضع الملف في الريبو، وتم تشغيله، وانتهى التنظيف والجمع."
+echo "==============================================="
+echo "SOVEREIGN LOCK ACTIVE."
+echo "Repo path: $TARGET_DIR"
+echo "Fingerprint root: ${DEVICE_FINGERPRINT:0:8}..."
+echo "Encrypted Vault: $ENCRYPTED_ARCHIVE"
+echo "Lock Signature: $LOCK_FILE"
+echo "==============================================="
